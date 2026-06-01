@@ -188,6 +188,8 @@ class ApiService {
     return null;
   }
 
+  // تعديل الملف الشخصي — يدعم رفع صورة اختياريًا عبر multipart/form-data.
+  // نستخدم PATCH لأن DRF يدعمه مع MultiPartParser على خلاف الـ JSON parser.
   static Future<Map<String, dynamic>> updateProfile(
     Map<String, String> data, {
     Uint8List? imageBytes,
@@ -198,6 +200,7 @@ class ApiService {
       final request = http.MultipartRequest('PATCH', Uri.parse("$baseUrl/profile/"));
       request.headers['Authorization'] = 'Token $token';
       data.forEach((key, value) => request.fields[key] = value);
+      // نرفع الصورة فقط إذا اختار المستخدم ملفاً فعلاً
       if (imageBytes != null && imageName != null) {
         request.files.add(http.MultipartFile.fromBytes('profile_photo', imageBytes, filename: imageName));
       }
@@ -325,7 +328,17 @@ class ApiService {
       final streamed = await request.send();
       final response = await http.Response.fromStream(streamed);
       if (response.statusCode == 201) return {'success': true};
-      return {'success': false, 'error': 'خطأ في إرسال الطلب'};
+      try {
+        final err = jsonDecode(utf8.decode(response.bodyBytes));
+        String msg = 'خطأ في إرسال الطلب';
+        if (err is Map && err.isNotEmpty) {
+          final v = err.values.first;
+          msg = (v is List) ? v.first.toString() : v.toString();
+        }
+        return {'success': false, 'error': msg};
+      } catch (_) {
+        return {'success': false, 'error': 'خطأ من السيرفر (${response.statusCode})'};
+      }
     } catch (e) {
       return {'success': false, 'error': 'تعذر الاتصال بالسيرفر'};
     }
@@ -491,6 +504,83 @@ class ApiService {
     }
   }
 
+  static Future<List<Map<String, dynamic>>> getCompanyEmployees() async {
+    try {
+      final headers = await _authHeaders();
+      final response = await http.get(Uri.parse("$baseUrl/company/employees/"), headers: headers);
+      if (response.statusCode == 200) {
+        final List data = jsonDecode(utf8.decode(response.bodyBytes));
+        return data.cast<Map<String, dynamic>>();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<Map<String, dynamic>> addCompanyEmployee(String uid) async {
+    try {
+      final headers = await _authHeaders();
+      final response = await http.post(
+        Uri.parse("$baseUrl/company/employees/"),
+        headers: headers,
+        body: jsonEncode({'unique_id': uid}),
+      );
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      if (response.statusCode == 201) return {'success': true, 'employee': data['employee']};
+      return {'success': false, 'error': data['error'] ?? 'خطأ في الإضافة'};
+    } catch (e) {
+      return {'success': false, 'error': 'تعذر الاتصال بالسيرفر'};
+    }
+  }
+
+  static Future<bool> removeCompanyEmployee(String uid) async {
+    try {
+      final headers = await _authHeaders();
+      final response = await http.delete(
+        Uri.parse("$baseUrl/company/employees/$uid/"),
+        headers: headers,
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<Map<String, dynamic>> bulkIssueCertificate({
+    required List<String> uniqueIds,
+    required String title,
+    required String issueDate,
+    String description = '',
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
+    try {
+      final token = await getToken();
+      final request = http.MultipartRequest('POST', Uri.parse("$baseUrl/certificates/company/bulk-issue/"));
+      request.headers['Authorization'] = 'Token $token';
+      request.fields['unique_ids']  = uniqueIds.join(',');
+      request.fields['title']       = title;
+      request.fields['issue_date']  = issueDate;
+      if (description.isNotEmpty) request.fields['description'] = description;
+      if (fileBytes != null && fileName != null) {
+        request.files.add(http.MultipartFile.fromBytes('image', fileBytes, filename: fileName));
+      }
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode == 201) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        return {'success': true, 'message': data['message'], 'errors': data['errors']};
+      }
+      try {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        return {'success': false, 'error': data['error'] ?? 'خطأ في الإصدار'};
+      } catch (_) {
+        return {'success': false, 'error': 'خطأ من السيرفر (${response.statusCode})'};
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'خطأ: ${e.toString()}'};
+    }
+  }
+
   static Future<Map<String, dynamic>> searchEmployeesByAI(String requirements) async {
     try {
       final headers = await _authHeaders();
@@ -566,6 +656,67 @@ class ApiService {
         body: jsonEncode({'unique_id': uid}),
       );
       if (response.statusCode == 201) return {'success': true};
+      final err = jsonDecode(utf8.decode(response.bodyBytes));
+      return {'success': false, 'error': err['error'] ?? 'خطأ'};
+    } catch (e) {
+      return {'success': false, 'error': 'تعذر الاتصال بالسيرفر'};
+    }
+  }
+
+  static Future<bool> removeCourseParticipant(int courseId, String uid) async {
+    try {
+      final headers = await _authHeaders();
+      final response = await http.delete(
+        Uri.parse("$baseUrl/certificates/company/courses/$courseId/enroll/$uid/"),
+        headers: headers,
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getCourseParticipants(int courseId) async {
+    try {
+      final headers = await _authHeaders();
+      final response = await http.get(Uri.parse("$baseUrl/certificates/company/courses/$courseId/enroll/"), headers: headers);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        return List<Map<String, dynamic>>.from(data['participants'] ?? []);
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<Map<String, dynamic>> issueSelectedCertificates({
+    required int courseId,
+    required List<String> uniqueIds,
+    required String title,
+    required String issueDate,
+    String description = '',
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
+    try {
+      final token = await getToken();
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse("$baseUrl/certificates/company/courses/$courseId/issue-selected/"),
+      );
+      request.headers['Authorization'] = 'Token $token';
+      request.fields['unique_ids']  = uniqueIds.join(',');
+      request.fields['title']       = title;
+      request.fields['issue_date']  = issueDate;
+      request.fields['description'] = description;
+      if (fileBytes != null && fileName != null) {
+        request.files.add(http.MultipartFile.fromBytes('image', fileBytes, filename: fileName));
+      }
+      final streamed  = await request.send();
+      final response  = await http.Response.fromStream(streamed);
+      if (response.statusCode == 201) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        return {'success': true, 'message': data['message']};
+      }
       final err = jsonDecode(utf8.decode(response.bodyBytes));
       return {'success': false, 'error': err['error'] ?? 'خطأ'};
     } catch (e) {

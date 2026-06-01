@@ -1,6 +1,5 @@
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../widgets/backgrounds.dart';
 import '../services/api_service.dart';
 
@@ -187,13 +186,11 @@ class _AdminRequestsPageState extends State<AdminRequestsPage> {
       return Padding(
         padding: const EdgeInsets.only(top: 10),
         child: GestureDetector(
-          onTap: () {
-            final a = html.AnchorElement(href: fileUrl)
-              ..setAttribute('target', '_blank')
-              ..setAttribute('rel', 'noopener');
-            html.document.body!.append(a);
-            a.click();
-            a.remove();
+          onTap: () async {
+            final uri = Uri.parse(fileUrl);
+            if (await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            }
           },
           child: Container(
             width: double.infinity,
