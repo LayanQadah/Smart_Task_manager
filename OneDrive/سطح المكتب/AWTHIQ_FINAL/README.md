@@ -34,7 +34,7 @@ AWTHIQ_FINAL/
 └── AwthiqBackEnd/                     ← Django REST Framework (الخادم)
     ├── core/                          ← الإعدادات الرئيسية (settings, urls)
     ├── accounts/                      ← المستخدمون والملفات الشخصية
-    ├── certificates/                  ← إصدار الشهادات والبلوكشين
+    ├── certificates/                  ← إصدار الشهادات والتوثيق الرقمي
     └── skills/                        ← المهارات وتقييم الذكاء الاصطناعي
 ```
 
@@ -186,7 +186,7 @@ DATABASE_URL=postgresql://...
 CLOUDINARY_CLOUD_NAME=...
 CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...
-ANTHROPIC_API_KEY=...        # لتقييم المهارات بالذكاء الاصطناعي
+GROQ_API_KEY=...             # لتقييم المهارات بالذكاء الاصطناعي (Groq API)
 ```
 
 ### الفرونت إند
@@ -214,7 +214,8 @@ flutter build web --release
 
 ```bash
 flutter build web --release
-vercel deploy build/web --prod --yes
+cd build/web
+vercel --prod
 ```
 
 ### الباك إند → Railway
@@ -231,22 +232,21 @@ python manage.py migrate
 ## ملاحظات تقنية مهمة
 
 ### رفع الصور في Flutter Web
-نستخدم `dart:html` مباشرةً بدلاً من حزمة `file_picker` لأنها تُرجع `bytes=null` أحياناً على المتصفح.  
-بعد `readAsArrayBuffer`، النتيجة `ByteBuffer` لا `List<int>`، لذا نتحقق من النوع:
+نستخدم `dart:html` مباشرةً لضمان التوافق مع iOS Safari، إذ يجب أن يُشغَّل `input.click()` بشكل متزامن داخل معالج حدث المستخدم.  
+نستخدم `readAsDataUrl` بدلاً من `readAsArrayBuffer` لتجنب مشكلة `ByteBuffer` على بعض المتصفحات:
 
 ```dart
-final buf = reader.result;
-final bytes = buf is ByteBuffer
-    ? buf.asUint8List()
-    : Uint8List.fromList(buf as List<int>);
+reader.readAsDataUrl(file);
+await reader.onLoad.first;
+final bytes = base64Decode((reader.result as String).split(',').last);
 ```
 
-### التحقق من الشهادات (Blockchain-بديل)
-كل شهادة تحصل على `certificate_hash` (SHA-256) يمكن التحقق منه عبر:  
+### التحقق من الشهادات (SHA-256 Hashing)
+كل شهادة تحصل على `certificate_hash` مولَّد بخوارزمية SHA-256 يمكن التحقق منه عبر:  
 `GET /api/certificates/verify/<hash>/`
 
 ### تقييم المهارات بالذكاء الاصطناعي
-يستخدم Claude API (Anthropic) لتوليد أسئلة اختبار مخصصة حسب المهارة المطلوبة، وتقييم الإجابات وإعطاء ميدالية ومستوى وتقرير تفصيلي.
+يستخدم **Groq API** لتوليد أسئلة اختبار مخصصة حسب المهارة المطلوبة، وتقييم الإجابات وإعطاء ميدالية ومستوى وتقرير تفصيلي.
 
 ---
 
